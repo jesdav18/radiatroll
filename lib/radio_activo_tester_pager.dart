@@ -3,13 +3,10 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
+import 'package:radiatroll/detector_settings_page.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
-enum DetectorMode {
-  manual,
-  proximity,
-  orientation,
-}
+enum DetectorMode { manual, proximity, orientation }
 
 class RadioactivoTesterPage extends StatefulWidget {
   const RadioactivoTesterPage({super.key});
@@ -19,24 +16,33 @@ class RadioactivoTesterPage extends StatefulWidget {
 }
 
 class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
-
   final AudioPlayer _player = AudioPlayer();
   bool _isPlaying = false;
   double _volume = 0.0;
 
-
   DetectorMode _mode = DetectorMode.manual;
-
 
   StreamSubscription<int>? _proximitySub;
   bool _isNear = false;
 
-
   StreamSubscription<AccelerometerEvent>? _accelSub;
   AccelerometerEvent? _currentAccel;
-  AccelerometerEvent? _savedOrientation; 
+  AccelerometerEvent? _savedOrientation;
 
-  final double _orientationThreshold = 2.0; 
+  final double _orientationThreshold = 2.0;
+
+  bool get _radiationActive {
+    switch (_mode) {
+      case DetectorMode.manual:
+        return _volume > 0.4;
+
+      case DetectorMode.proximity:
+        return _isNear;
+
+      case DetectorMode.orientation:
+        return _isInSavedOrientation();
+    }
+  }
 
   @override
   void initState() {
@@ -49,18 +55,17 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
   void _initProximity() {
     _proximitySub = ProximitySensor.events.listen((int event) {
-    
       setState(() {
         _isNear = (event > 0);
       });
-      _applyModeLogic(); 
+      _applyModeLogic();
     });
   }
 
   void _initAccelerometer() {
-      _accelSub = accelerometerEventStream().listen((event) {
+    _accelSub = accelerometerEventStream().listen((event) {
       _currentAccel = event;
-      _applyModeLogic(); 
+      _applyModeLogic();
     });
   }
 
@@ -81,10 +86,7 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
       await _player.pause();
       setState(() => _isPlaying = false);
     } else {
-      await _player.play(
-        AssetSource('sounds/geiger.mp3'),
-        volume: _volume,
-      );
+      await _player.play(AssetSource('sounds/geiger.mp3'), volume: _volume);
       setState(() => _isPlaying = true);
     }
   }
@@ -105,11 +107,9 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
     switch (_mode) {
       case DetectorMode.manual:
-      
         break;
 
       case DetectorMode.proximity:
-     
         if (_isNear) {
           _setVolume(1.0);
         } else {
@@ -118,7 +118,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
         break;
 
       case DetectorMode.orientation:
-     
         if (_isInSavedOrientation()) {
           _setVolume(1.0);
         } else {
@@ -134,16 +133,18 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
       _savedOrientation = _currentAccel;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Posición de prueba guardada')),
+      const SnackBar(
+        content: Text(
+          'Posición de prueba guardada (puedes actualizarla cuando quieras)',
+        ),
+      ),
     );
   }
 
-  @override
-  void dispose() {
-    _player.dispose();
-    _proximitySub?.cancel();
-    _accelSub?.cancel();
-    super.dispose();
+  void _clearOrientation() {
+    setState(() {
+      _savedOrientation = null;
+    });
   }
 
   String _statusText() {
@@ -161,7 +162,7 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
       case DetectorMode.orientation:
         if (_savedOrientation == null) {
-          return 'Guarde una posición para activar la prueba';
+          return 'Sin posición guardada: vaya a configuración para guardar una.';
         }
         return _isInSavedOrientation()
             ? 'Posición CRÍTICA: ¡Radioactivo! ☢️'
@@ -169,124 +170,81 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
     }
   }
 
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DetectorSettingsPage(
+          mode: _mode,
+          manualVolume: _volume,
+          hasSavedOrientation: _savedOrientation != null,
+          isNear: _isNear,
+          onModeChanged: (m) {
+            _changeMode(m);
+          },
+          onManualVolumeChanged: (v) async {
+            await _setVolume(v);
+          },
+          onSaveOrientation: () {
+            _saveCurrentOrientation();
+          },
+          onClearOrientation: () {
+            _clearOrientation();
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    _proximitySub?.cancel();
+    _accelSub?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final meterAsset = _radiationActive
+        ? 'assets/images/radiacion_activa.png'
+        : 'assets/images/sin_radiacion.png';
+
     return Scaffold(
       backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        title: const Text('RadiaTroll'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: _openSettings,
+          ),
+        ],
+      ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              const SizedBox(height: 16),
-              const Text(
-                'Detector de Radiación',
-                style: TextStyle(
-                  color: Colors.greenAccent,
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  height: 220,
+                  child: Image.asset(meterAsset, fit: BoxFit.contain),
                 ),
-              ),
-              const SizedBox(height: 24),
-
-          
-              ToggleButtons(
-                isSelected: [
-                  _mode == DetectorMode.manual,
-                  _mode == DetectorMode.proximity,
-                  _mode == DetectorMode.orientation,
-                ],
-                onPressed: (index) {
-                  _changeMode(DetectorMode.values[index]);
-                },
-                borderRadius: BorderRadius.circular(12),
-                children: const [
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('Manual'),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('Proximidad'),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('Posición'),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 32),
-
-             
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: LinearProgressIndicator(
-                  value: _volume,
-                  minHeight: 14,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _statusText(),
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                textAlign: TextAlign.center,
-              ),
-
-              const SizedBox(height: 32),
-
-           
-              ElevatedButton(
-                onPressed: _togglePlay,
-                child: Text(_isPlaying ? 'Detener prueba' : 'Hacer prueba'),
-              ),
-
-              const SizedBox(height: 24),
-
-           
-              if (_mode == DetectorMode.manual) ...[
-                const Text(
-                  'Ajuste de sensibilidad (secreto)',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                Slider(
-                  value: _volume,
-                  onChanged: (v) => _setVolume(v),
-                  min: 0,
-                  max: 1,
-                ),
-              ] else if (_mode == DetectorMode.proximity) ...[
-                const Text(
-                  'Modo proximidad: acerque el teléfono a la persona',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 24),
                 Text(
-                  _isNear ? 'Detectando MUY cerca...' : 'Lejos...',
-                  style: const TextStyle(color: Colors.white),
-                ),
-              ] else if (_mode == DetectorMode.orientation) ...[
-                const Text(
-                  'Modo posición: coloque el cel como quiera y guarde la posición.\n'
-                  'Solo sonará cuando el cel esté igual.',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  _statusText(),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 32),
                 ElevatedButton(
-                  onPressed: _saveCurrentOrientation,
-                  child: const Text('Guardar posición de prueba'),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _savedOrientation == null
-                      ? 'Ninguna posición guardada todavía'
-                      : 'Posición guardada',
-                  style: const TextStyle(color: Colors.white),
+                  onPressed: _togglePlay,
+                  child: Text(_isPlaying ? 'Detener prueba' : 'Hacer prueba'),
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),
