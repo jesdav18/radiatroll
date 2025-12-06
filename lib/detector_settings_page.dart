@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:radiatroll/radio_activo_tester_pager.dart';
 
 class DetectorSettingsPage extends StatefulWidget {
@@ -32,6 +33,7 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
   late DetectorMode _localMode;
   late double _localManualVolume;
   late bool _localHasSavedOrientation;
+  String _version = '';
 
   @override
   void initState() {
@@ -39,6 +41,15 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
     _localMode = widget.mode;
     _localManualVolume = widget.manualVolume;
     _localHasSavedOrientation = widget.hasSavedOrientation;
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (!mounted) return;
+    setState(() {
+      _version = '${info.version}+${info.buildNumber}';
+    });
   }
 
   void _updateMode(DetectorMode mode) {
@@ -114,9 +125,7 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
               ],
             ),
           ),
-
           const SizedBox(height: 16),
-
           if (_localMode == DetectorMode.manual) ...[
             const Text(
               'Volumen (modo manual)',
@@ -134,7 +143,6 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
             ),
             const SizedBox(height: 16),
           ],
-
           if (_localMode == DetectorMode.proximity) ...[
             const Text(
               'Estado de proximidad',
@@ -147,7 +155,6 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
             ),
             const SizedBox(height: 16),
           ],
-
           if (_localMode == DetectorMode.orientation) ...[
             const Text(
               'Configuración de posición',
@@ -185,6 +192,13 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
               style: const TextStyle(color: Colors.white70),
             ),
           ],
+          const SizedBox(height: 24),
+          if (_version.isNotEmpty)
+            Text(
+              'RadiaTroll v$_version',
+              style: const TextStyle(color: Colors.white38, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
         ],
       ),
     );

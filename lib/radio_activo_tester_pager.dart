@@ -7,6 +7,7 @@ import 'package:proximity_sensor/proximity_sensor.dart';
 import 'package:radiatroll/detector_settings_page.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:volume_controller/volume_controller.dart';
+import 'package:vibration/vibration.dart';
 
 enum DetectorMode { manual, proximity, orientation }
 
@@ -31,7 +32,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
   DetectorMode _mode = DetectorMode.manual;
 
- 
   StreamSubscription<int>? _proximitySub;
   bool _isNear = false;
 
@@ -47,25 +47,22 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
   DateTime? _lastMotionTime;
   final double _motionThreshold = 4.0;
 
+  bool _lastRadiation = false;
+
   bool get _radiationActive {
-   
     if (_systemVolume <= 0.01) return false;
 
     switch (_mode) {
       case DetectorMode.manual:
-      
         return _isPlaying;
 
       case DetectorMode.proximity:
-     
         return _motionState != MotionRadiationState.idle;
 
       case DetectorMode.orientation:
         return _savedOrientation != null && _isInSavedOrientation();
     }
   }
-
- 
 
   @override
   void initState() {
@@ -83,7 +80,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
     _initProximity();
     _initAccelerometer();
   }
-
 
   void _initProximity() {
     _proximitySub = ProximitySensor.events.listen((int event) {
@@ -126,7 +122,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
     if (_motionState == MotionRadiationState.idle ||
         _motionState == MotionRadiationState.fading) {
-
       _motionState = MotionRadiationState.active;
       _setVolume(1.0);
     } else {
@@ -146,7 +141,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
     setState(() {});
   }
 
-
   bool _isInSavedOrientation() {
     if (_savedOrientation == null || _currentAccel == null) return false;
 
@@ -159,14 +153,17 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
         dz < _orientationThreshold;
   }
 
-
-  Future<void> _togglePlay() async {
-    if (_isPlaying) {
+  Future<void> _setPlaying(bool value) async {
+    if (value == _isPlaying) return;
+    if (value) {
+      await _player.play(
+        AssetSource('sounds/geiger.mp3'),
+        volume: _volume,
+      );
+      setState(() => _isPlaying = true);
+    } else {
       await _player.pause();
       setState(() => _isPlaying = false);
-    } else {
-      await _player.play(AssetSource('sounds/geiger.mp3'), volume: _volume);
-      setState(() => _isPlaying = true);
     }
   }
 
@@ -189,7 +186,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
         break;
 
       case DetectorMode.proximity:
-      
         break;
 
       case DetectorMode.orientation:
@@ -214,31 +210,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
     setState(() => _savedOrientation = null);
   }
 
-  String _statusText() {
-    if (!_isPlaying) return 'Presione "Hacer prueba" para iniciar';
-
-    switch (_mode) {
-      case DetectorMode.manual:
-        return _systemVolume == 0
-            ? 'Nivel seguro'
-            : '¡CRÍTICO! ANDA RADIOACTIVO';
-
-      case DetectorMode.proximity:
-        return switch (_motionState) {
-          MotionRadiationState.idle => 'Sin movimiento',
-          MotionRadiationState.active => 'Movimiento detectado',
-          MotionRadiationState.fading => 'Reduciendo radiación...',
-        };
-
-      case DetectorMode.orientation:
-        return _savedOrientation == null
-            ? 'Guarde una posición primero'
-            : _isInSavedOrientation()
-            ? 'Posición CRÍTICA'
-            : 'Sin riesgo';
-    }
-  }
-
   void _openSettings() {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -256,7 +227,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
     );
   }
 
-
   @override
   void dispose() {
     _player.dispose();
@@ -269,7 +239,17 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final meterAsset = _radiationActive
+    final radiation = _radiationActive;
+    if (radiation && !_lastRadiation) {
+      Vibration.hasVibrator().then((has) {
+        if (has == true) {
+          Vibration.vibrate(duration: 80);
+        }
+      });
+    }
+    _lastRadiation = radiation;
+
+    final meterAsset = radiation
         ? 'assets/images/radiacion_activa.png'
         : 'assets/images/sin_radiacion.png';
 
@@ -296,15 +276,14 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
                   height: 220,
                   child: Image.asset(meterAsset, fit: BoxFit.contain),
                 ),
-                const SizedBox(height: 24),
-                Text(
-                  _statusText(),
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                ),
                 const SizedBox(height: 32),
-                ElevatedButton(
-                  onPressed: _togglePlay,
-                  child: Text(_isPlaying ? 'Detener prueba' : 'Hacer prueba'),
+                Transform.scale(
+                  scale: 1.6,
+                  child: Switch.adaptive(
+                    value: _isPlaying,
+                    onChanged: (v) => _setPlaying(v),
+                    activeThumbColor: Colors.greenAccent,
+                  ),
                 ),
               ],
             ),
