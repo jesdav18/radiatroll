@@ -96,7 +96,7 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
                 RadioListTile<DetectorMode>(
                   value: DetectorMode.proximity,
                   activeColor: Colors.greenAccent,
-                  title: const Text('Proximidad', style: TextStyle(color: Colors.white)),
+                  title: const Text('Proximidad (Experimental)', style: TextStyle(color: Colors.white)),
                   subtitle: const Text(
                     'Más cerca = más ruido. Más lejos = menos.',
                     style: TextStyle(color: Colors.white70),
@@ -156,7 +156,7 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
             const SizedBox(height: 8),
             const Text(
               'Coloca el celular en la posición que quieras usar para la prueba '
-              '(por ejemplo, apuntando al pecho de tu compa) y presiona:',
+              '(por ejemplo, apuntando al pecho de una persona) y presiona:',
               style: TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 12),
@@ -180,7 +180,7 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
             const SizedBox(height: 8),
             Text(
               _localHasSavedOrientation
-                  ? 'Posición guardada ✔️ (puedes actualizarla cuando quieras)'
+                  ? 'Posición guardada (puedes actualizarla cuando quieras)'
                   : 'No hay ninguna posición guardada.',
               style: const TextStyle(color: Colors.white70),
             ),
