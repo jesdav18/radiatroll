@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
 import 'package:radiatroll/detector_settings_page.dart';
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:volume_controller/volume_controller.dart';
 
 enum DetectorMode { manual, proximity, orientation }
+
+enum MotionRadiationState { idle, active, fading }
 
 class RadioactivoTesterPage extends StatefulWidget {
   const RadioactivoTesterPage({super.key});
@@ -17,57 +21,131 @@ class RadioactivoTesterPage extends StatefulWidget {
 
 class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
   final AudioPlayer _player = AudioPlayer();
+  final VolumeController _volumeController = VolumeController();
+
   bool _isPlaying = false;
-  double _volume = 0.0;
+
+  double _volume = 1.0;
+
+  double _systemVolume = 1.0;
 
   DetectorMode _mode = DetectorMode.manual;
 
+ 
   StreamSubscription<int>? _proximitySub;
   bool _isNear = false;
 
   StreamSubscription<AccelerometerEvent>? _accelSub;
   AccelerometerEvent? _currentAccel;
+  AccelerometerEvent? _prevAccel;
   AccelerometerEvent? _savedOrientation;
 
   final double _orientationThreshold = 2.0;
 
+  MotionRadiationState _motionState = MotionRadiationState.idle;
+  Timer? _fadeTimer;
+  DateTime? _lastMotionTime;
+  final double _motionThreshold = 4.0;
+
   bool get _radiationActive {
+   
+    if (_systemVolume <= 0.01) return false;
+
     switch (_mode) {
       case DetectorMode.manual:
-        return _volume > 0.4;
+      
+        return _isPlaying;
 
       case DetectorMode.proximity:
-        return _isNear;
+     
+        return _motionState != MotionRadiationState.idle;
 
       case DetectorMode.orientation:
-        return _isInSavedOrientation();
+        return _savedOrientation != null && _isInSavedOrientation();
     }
   }
+
+ 
 
   @override
   void initState() {
     super.initState();
     _player.setReleaseMode(ReleaseMode.loop);
 
+    _volumeController.getVolume().then((v) {
+      setState(() => _systemVolume = v);
+    });
+
+    _volumeController.listener((v) {
+      setState(() => _systemVolume = v);
+    });
+
     _initProximity();
     _initAccelerometer();
   }
 
+
   void _initProximity() {
     _proximitySub = ProximitySensor.events.listen((int event) {
-      setState(() {
-        _isNear = (event > 0);
-      });
+      setState(() => _isNear = event > 0);
       _applyModeLogic();
     });
   }
 
   void _initAccelerometer() {
     _accelSub = accelerometerEventStream().listen((event) {
+      _prevAccel = _currentAccel;
       _currentAccel = event;
+
+      if (_mode == DetectorMode.proximity && _prevAccel != null) {
+        final dx = event.x - _prevAccel!.x;
+        final dy = event.y - _prevAccel!.y;
+        final dz = event.z - _prevAccel!.z;
+
+        final delta = sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (delta > _motionThreshold) {
+          _onMotionPulse();
+        }
+      }
+
       _applyModeLogic();
     });
   }
+
+  void _onMotionPulse() {
+    final now = DateTime.now();
+
+    if (_lastMotionTime != null &&
+        now.difference(_lastMotionTime!).inMilliseconds < 400) {
+      return;
+    }
+
+    _lastMotionTime = now;
+    _fadeTimer?.cancel();
+
+    if (_motionState == MotionRadiationState.idle ||
+        _motionState == MotionRadiationState.fading) {
+
+      _motionState = MotionRadiationState.active;
+      _setVolume(1.0);
+    } else {
+      _motionState = MotionRadiationState.fading;
+
+      _fadeTimer = Timer.periodic(const Duration(milliseconds: 120), (t) {
+        if (_volume <= 0.05) {
+          _setVolume(0.0);
+          _motionState = MotionRadiationState.idle;
+          t.cancel();
+        } else {
+          _setVolume((_volume - 0.1).clamp(0.0, 1.0));
+        }
+      });
+    }
+
+    setState(() {});
+  }
+
 
   bool _isInSavedOrientation() {
     if (_savedOrientation == null || _currentAccel == null) return false;
@@ -80,6 +158,7 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
         dy < _orientationThreshold &&
         dz < _orientationThreshold;
   }
+
 
   Future<void> _togglePlay() async {
     if (_isPlaying) {
@@ -94,7 +173,7 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
   Future<void> _setVolume(double value) async {
     _volume = value.clamp(0.0, 1.0);
     await _player.setVolume(_volume);
-    setState(() {});
+    if (mounted) setState(() {});
   }
 
   void _changeMode(DetectorMode mode) {
@@ -110,11 +189,7 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
         break;
 
       case DetectorMode.proximity:
-        if (_isNear) {
-          _setVolume(1.0);
-        } else {
-          _setVolume(0.1);
-        }
+      
         break;
 
       case DetectorMode.orientation:
@@ -129,22 +204,14 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
   void _saveCurrentOrientation() {
     if (_currentAccel == null) return;
-    setState(() {
-      _savedOrientation = _currentAccel;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Posición de prueba guardada (puedes actualizarla cuando quieras)',
-        ),
-      ),
-    );
+    setState(() => _savedOrientation = _currentAccel);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Posición guardada')));
   }
 
   void _clearOrientation() {
-    setState(() {
-      _savedOrientation = null;
-    });
+    setState(() => _savedOrientation = null);
   }
 
   String _statusText() {
@@ -152,21 +219,23 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
 
     switch (_mode) {
       case DetectorMode.manual:
-        if (_volume == 0) return 'Nivel seguro';
-        if (_volume < 0.4) return 'Exposición leve';
-        if (_volume < 0.8) return 'PELIGRO';
-        return '¡CRÍTICO! ANDA RADIOACTIVO';
+        return _systemVolume == 0
+            ? 'Nivel seguro'
+            : '¡CRÍTICO! ANDA RADIOACTIVO';
 
       case DetectorMode.proximity:
-        return _isNear ? 'MUY CERCA: Contaminado ☢️' : 'Lejos: Nivel bajo';
+        return switch (_motionState) {
+          MotionRadiationState.idle => 'Sin movimiento',
+          MotionRadiationState.active => 'Movimiento detectado',
+          MotionRadiationState.fading => 'Reduciendo radiación...',
+        };
 
       case DetectorMode.orientation:
-        if (_savedOrientation == null) {
-          return 'Sin posición guardada: vaya a configuración para guardar una.';
-        }
-        return _isInSavedOrientation()
-            ? 'Posición CRÍTICA: ¡Radioactivo! ☢️'
-            : 'Fuera de posición: sin riesgo aparente';
+        return _savedOrientation == null
+            ? 'Guarde una posición primero'
+            : _isInSavedOrientation()
+            ? 'Posición CRÍTICA'
+            : 'Sin riesgo';
     }
   }
 
@@ -178,28 +247,23 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
           manualVolume: _volume,
           hasSavedOrientation: _savedOrientation != null,
           isNear: _isNear,
-          onModeChanged: (m) {
-            _changeMode(m);
-          },
-          onManualVolumeChanged: (v) async {
-            await _setVolume(v);
-          },
-          onSaveOrientation: () {
-            _saveCurrentOrientation();
-          },
-          onClearOrientation: () {
-            _clearOrientation();
-          },
+          onModeChanged: _changeMode,
+          onManualVolumeChanged: _setVolume,
+          onSaveOrientation: _saveCurrentOrientation,
+          onClearOrientation: _clearOrientation,
         ),
       ),
     );
   }
+
 
   @override
   void dispose() {
     _player.dispose();
     _proximitySub?.cancel();
     _accelSub?.cancel();
+    _fadeTimer?.cancel();
+    _volumeController.removeListener();
     super.dispose();
   }
 
@@ -236,7 +300,6 @@ class _RadioactivoTesterPageState extends State<RadioactivoTesterPage> {
                 Text(
                   _statusText(),
                   style: const TextStyle(color: Colors.white, fontSize: 14),
-                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 32),
                 ElevatedButton(
