@@ -84,6 +84,12 @@ class _DetectorSettingsPageState extends State<DetectorSettingsPage> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
+            'App de broma. No es un medidor real de radiación.',
+            style: TextStyle(color: Colors.white70, fontSize: 14, fontStyle: FontStyle.italic),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          const Text(
             'Modo de detección',
             style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
           ),
